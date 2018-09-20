@@ -19,23 +19,24 @@ TAKEOFF_CMD = 0x0054
 LAND_CMD = 0x0055
 FLIP_CMD = 0x005c
 
-#Flip commands taken from Go version of code
-#FlipFront flips forward.
+# Flip commands taken from Go version of code
+# FlipFront flips forward.
 FlipFront = 0
-#FlipLeft flips left.
+# FlipLeft flips left.
 FlipLeft = 1
-#FlipBack flips backwards.
+# FlipBack flips backwards.
 FlipBack = 2
-#FlipRight flips to the right.
+# FlipRight flips to the right.
 FlipRight = 3
-#FlipForwardLeft flips forwards and to the left.
+# FlipForwardLeft flips forwards and to the left.
 FlipForwardLeft = 4
-#FlipBackLeft flips backwards and to the left.
+# FlipBackLeft flips backwards and to the left.
 FlipBackLeft = 5
-#FlipBackRight flips backwards and to the right.
+# FlipBackRight flips backwards and to the right.
 FlipBackRight = 6
-#FlipForwardRight flips forwards and to the right.
+# FlipForwardRight flips forwards and to the right.
 FlipForwardRight = 7
+
 
 class Packet(object):
     def __init__(self, cmd, pkt_type=0x68):
@@ -119,7 +120,7 @@ class FlightData(object):
         self.front_lsc = 0
         self.front_out = 0
         self.gravity_state = 0
-        self.ground_speed = 0
+        self.vertical_speed = 0
         self.height = 0
         self.imu_calibration_state = 0
         self.imu_state = 0
@@ -141,7 +142,7 @@ class FlightData(object):
         self.height = int16(data[0], data[1])
         self.north_speed = int16(data[2], data[3])
         self.east_speed = int16(data[4], data[5])
-        self.ground_speed = int16(data[6], data[7])
+        self.vertical_speed = int16(data[6], data[7])
         self.fly_time = int16(data[8], data[9])
 
         self.imu_state = ((data[10] >> 0) & 0x1)
@@ -154,8 +155,8 @@ class FlightData(object):
 
         self.imu_calibration_state = data[11]
         self.battery_percentage = data[12]
-        self.drone_battery_left = int16(data[13], data[14])
-        self.drone_fly_time_left = int16(data[15], data[16])
+        self.drone_fly_time_left = int16(data[13], data[14])
+        self.drone_battery_left = int16(data[15], data[16])
 
         self.em_sky = ((data[17] >> 0) & 0x1)
         self.em_ground = ((data[17] >> 1) & 0x1)

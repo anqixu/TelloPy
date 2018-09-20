@@ -14,8 +14,6 @@ from . utils import *
 from . protocol import *
 from . import dispatcher
 
-log = logger.Logger('Tello')
-
 
 class Tello(object):
     EVENT_CONNECTED = event.Event('connected')
@@ -53,11 +51,11 @@ class Tello(object):
     LOG_DEBUG = logger.LOG_DEBUG
     LOG_ALL = logger.LOG_ALL
 
-    def __init__(self, port=9000):
-        self.tello_addr = ('192.168.10.1', 8889)
+    def __init__(self, client_port=9000, tello_ip='192.168.0.1', tello_cmd_port=8889, log=None):
+        self.tello_addr = (tello_ip, tello_cmd_port)
         self.debug = False
         self.pkt_seq_num = 0x01e4
-        self.port = port
+        self.client_port = client_port
         self.udpsize = 2000
         self.left_x = 0.0
         self.left_y = 0.0
@@ -71,26 +69,28 @@ class Tello(object):
         self.prev_video_data_time = None
         self.video_data_size = 0
         self.video_data_loss = 0
-        self.log = log
+        self.log = log or logger.Logger('Tello')
         self.exposure = 0
         self.video_encoder_rate = 4
         self.video_stream = None
 
         # Create a UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(('', self.port))
+        self.sock.bind(('', self.client_port))
         self.sock.settimeout(2.0)
 
         dispatcher.connect(self.__state_machine, dispatcher.signal.All)
-        threading.Thread(target=self.__recv_thread).start()
-        threading.Thread(target=self.__video_thread).start()
+        self.recv_thread = threading.Thread(target=self.__recv_thread)
+        self.video_thread = threading.Thread(target=self.__video_thread)
+        self.recv_thread.start()
+        self.video_thread.start()
 
     def set_loglevel(self, level):
         """
         Set_loglevel controls the output messages. Valid levels are
         LOG_ERROR, LOG_WARN, LOG_INFO, LOG_DEBUG and LOG_ALL.
         """
-        log.set_level(level)
+        self.log.set_level(level)
 
     def get_video_stream(self):
         """
@@ -98,7 +98,7 @@ class Tello(object):
         """
         newly_created = False
         self.lock.acquire()
-        log.info('get video stream')
+        self.log.info('get video stream')
         try:
             if self.video_stream is None:
                 self.video_stream = video_stream.VideoStream(self)
@@ -127,7 +127,8 @@ class Tello(object):
         port0 = (int(port/1000) % 10) << 4 | (int(port/100) % 10)
         port1 = (int(port/10) % 10) << 4 | (int(port/1) % 10)
         buf = 'conn_req:%c%c' % (chr(port0), chr(port1))
-        log.info('send connection request (cmd="%s%02x%02x")' % (str(buf[:-2]), port0, port1))
+        self.log.info('send connection request (cmd="%s%02x%02x")' %
+                      (str(buf[:-2]), port0, port1))
         return self.send_packet(Packet(buf))
 
     def subscribe(self, signal, handler):
@@ -140,19 +141,21 @@ class Tello(object):
             del args['signal']
         if 'sender' in args:
             del args['sender']
-        log.debug('publish signal=%s, args=%s' % (event, args))
+        self.log.debug('publish signal=%s, args=%s' % (event, args))
         dispatcher.send(event, sender=self, **args)
 
     def takeoff(self):
         """Takeoff tells the drones to liftoff and start flying."""
-        log.info('takeoff (cmd=0x%02x seq=0x%04x)' % (TAKEOFF_CMD, self.pkt_seq_num))
+        self.log.info('takeoff (cmd=0x%02x seq=0x%04x)' %
+                      (TAKEOFF_CMD, self.pkt_seq_num))
         pkt = Packet(TAKEOFF_CMD)
         pkt.fixup()
         return self.send_packet(pkt)
 
     def land(self):
         """Land tells the drone to come in for landing."""
-        log.info('land (cmd=0x%02x seq=0x%04x)' % (LAND_CMD, self.pkt_seq_num))
+        self.log.info('land (cmd=0x%02x seq=0x%04x)' %
+                      (LAND_CMD, self.pkt_seq_num))
         pkt = Packet(LAND_CMD)
         pkt.add_byte(0x00)
         pkt.fixup()
@@ -160,11 +163,14 @@ class Tello(object):
 
     def quit(self):
         """Quit stops the internal threads."""
-        log.info('quit')
+        self.log.info('quit')
         self.__publish(event=self.__EVENT_QUIT_REQ)
+        self.recv_thread.join()
+        self.video_thread.join()
 
     def __send_time_command(self):
-        log.info('send_time (cmd=0x%02x seq=0x%04x)' % (TIME_CMD, self.pkt_seq_num))
+        self.log.info('send_time (cmd=0x%02x seq=0x%04x)' %
+                      (TIME_CMD, self.pkt_seq_num))
         pkt = Packet(TIME_CMD, 0x50)
         pkt.add_byte(0)
         pkt.add_time()
@@ -178,7 +184,8 @@ class Tello(object):
 
     def start_video(self):
         """Start_video tells the drone to send start info (SPS/PPS) for video stream."""
-        log.info('start video (cmd=0x%02x seq=0x%04x)' % (VIDEO_START_CMD, self.pkt_seq_num))
+        self.log.info('start video (cmd=0x%02x seq=0x%04x)' %
+                      (VIDEO_START_CMD, self.pkt_seq_num))
         self.video_enabled = True
         self.__send_exposure()
         self.__send_video_encoder_rate()
@@ -188,7 +195,8 @@ class Tello(object):
         """Set_exposure sets the drone camera exposure level. Valid levels are 0, 1, and 2."""
         if level < 0 or 2 < level:
             raise error.TelloError('Invalid exposure level')
-        log.info('set exposure (cmd=0x%02x seq=0x%04x)' % (EXPOSURE_CMD, self.pkt_seq_num))
+        self.log.info('set exposure (cmd=0x%02x seq=0x%04x)' %
+                      (EXPOSURE_CMD, self.pkt_seq_num))
         self.exposure = level
         return self.__send_exposure()
 
@@ -200,8 +208,8 @@ class Tello(object):
 
     def set_video_encoder_rate(self, rate):
         """Set_video_encoder_rate sets the drone video encoder rate."""
-        log.info('set video encoder rate (cmd=0x%02x seq=%04x)' %
-                 (VIDEO_ENCODER_RATE_CMD, self.pkt_seq_num))
+        self.log.info('set video encoder rate (cmd=0x%02x seq=%04x)' %
+                      (VIDEO_ENCODER_RATE_CMD, self.pkt_seq_num))
         self.video_encoder_rate = rate
         return self.__send_video_encoder_rate()
 
@@ -213,32 +221,32 @@ class Tello(object):
 
     def up(self, val):
         """Up tells the drone to ascend. Pass in an int from 0-100."""
-        log.info('up(val=%d)' % val)
+        self.log.info('up(val=%d)' % val)
         self.left_y = val / 100.0
 
     def down(self, val):
         """Down tells the drone to descend. Pass in an int from 0-100."""
-        log.info('down(val=%d)' % val)
+        self.log.info('down(val=%d)' % val)
         self.left_y = val / 100.0 * -1
 
     def forward(self, val):
         """Forward tells the drone to go forward. Pass in an int from 0-100."""
-        log.info('forward(val=%d)' % val)
+        self.log.info('forward(val=%d)' % val)
         self.right_y = val / 100.0
 
     def backward(self, val):
         """Backward tells the drone to go in reverse. Pass in an int from 0-100."""
-        log.info('backward(val=%d)' % val)
+        self.log.info('backward(val=%d)' % val)
         self.right_y = val / 100.0 * -1
 
     def right(self, val):
         """Right tells the drone to go right. Pass in an int from 0-100."""
-        log.info('right(val=%d)' % val)
+        self.log.info('right(val=%d)' % val)
         self.right_x = val / 100.0
 
     def left(self, val):
         """Left tells the drone to go left. Pass in an int from 0-100."""
-        log.info('left(val=%d)' % val)
+        self.log.info('left(val=%d)' % val)
         self.right_x = val / 100.0 * -1
 
     def clockwise(self, val):
@@ -246,7 +254,7 @@ class Tello(object):
         Clockwise tells the drone to rotate in a clockwise direction.
         Pass in an int from 0-100.
         """
-        log.info('clockwise(val=%d)' % val)
+        self.log.info('clockwise(val=%d)' % val)
         self.left_x = val / 100.0
 
     def counter_clockwise(self, val):
@@ -254,28 +262,31 @@ class Tello(object):
         CounterClockwise tells the drone to rotate in a counter-clockwise direction.
         Pass in an int from 0-100.
         """
-        log.info('counter_clockwise(val=%d)' % val)
+        self.log.info('counter_clockwise(val=%d)' % val)
         self.left_x = val / 100.0 * -1
 
     def flip_forward(self):
         """flip_forward tells the drone to perform a forwards flip"""
-        log.info('flip_forward (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_forward (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipFront)
         pkt.fixup()
         return self.send_packet(pkt)
-		
+
     def flip_back(self):
         """flip_back tells the drone to perform a backwards flip"""
-        log.info('flip_back (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_back (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipBack)
         pkt.fixup()
         return self.send_packet(pkt)
-		
+
     def flip_right(self):
         """flip_right tells the drone to perform a right flip"""
-        log.info('flip_right (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_right (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipRight)
         pkt.fixup()
@@ -283,7 +294,8 @@ class Tello(object):
 
     def flip_left(self):
         """flip_left tells the drone to perform a left flip"""
-        log.info('flip_left (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_left (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipLeft)
         pkt.fixup()
@@ -291,7 +303,8 @@ class Tello(object):
 
     def flip_forwardleft(self):
         """flip_forwardleft tells the drone to perform a forwards left flip"""
-        log.info('flip_forwardleft (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_forwardleft (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipForwardLeft)
         pkt.fixup()
@@ -299,7 +312,8 @@ class Tello(object):
 
     def flip_backleft(self):
         """flip_backleft tells the drone to perform a backwards left flip"""
-        log.info('flip_backleft (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_backleft (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipBackLeft)
         pkt.fixup()
@@ -307,7 +321,8 @@ class Tello(object):
 
     def flip_forwardright(self):
         """flip_forwardright tells the drone to perform a forwards right flip"""
-        log.info('flip_forwardright (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_forwardright (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipForwardRight)
         pkt.fixup()
@@ -315,7 +330,8 @@ class Tello(object):
 
     def flip_backright(self):
         """flip_backleft tells the drone to perform a backwards right flip"""
-        log.info('flip_backright (cmd=0x%02x seq=0x%04x)' % (FLIP_CMD, self.pkt_seq_num))
+        self.log.info('flip_backright (cmd=0x%02x seq=0x%04x)' %
+                      (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
         pkt.add_byte(FlipBackLeft)
         pkt.fixup()
@@ -334,7 +350,7 @@ class Tello(object):
         Pass in an int from -1.0 ~ 1.0. (positive value means upward)
         """
         if self.left_y != self.__fix_range(throttle):
-            log.info('set_throttle(val=%4.2f)' % throttle)
+            self.log.info('set_throttle(val=%4.2f)' % throttle)
         self.left_y = self.__fix_range(throttle)
 
     def set_yaw(self, yaw):
@@ -343,7 +359,7 @@ class Tello(object):
         Pass in an int from -1.0 ~ 1.0. (positive value will make the drone turn to the right)
         """
         if self.left_x != self.__fix_range(yaw):
-            log.info('set_yaw(val=%4.2f)' % yaw)
+            self.log.info('set_yaw(val=%4.2f)' % yaw)
         self.left_x = self.__fix_range(yaw)
 
     def set_pitch(self, pitch):
@@ -352,7 +368,7 @@ class Tello(object):
         Pass in an int from -1.0 ~ 1.0. (positive value will make the drone move forward)
         """
         if self.right_y != self.__fix_range(pitch):
-            log.info('set_pitch(val=%4.2f)' % pitch)
+            self.log.info('set_pitch(val=%4.2f)' % pitch)
         self.right_y = self.__fix_range(pitch)
 
     def set_roll(self, roll):
@@ -361,7 +377,7 @@ class Tello(object):
         Pass in an int from -1.0 ~ 1.0. (positive value will make the drone move to the right)
         """
         if self.right_x != self.__fix_range(roll):
-            log.info('set_roll(val=%4.2f)' % roll)
+            self.log.info('set_roll(val=%4.2f)' % roll)
         self.right_x = self.__fix_range(roll)
 
     def __send_stick_command(self):
@@ -382,10 +398,10 @@ class Tello(object):
          |       |       |       |       |       |       |
              byte5   byte4   byte3   byte2   byte1   byte0
         '''
-        log.debug("stick command: yaw=%4d thr=%4d pit=%4d rol=%4d" %
-                  (axis4, axis3, axis2, axis1))
-        log.debug("stick command: yaw=%04x thr=%04x pit=%04x rol=%04x" %
-                  (axis4, axis3, axis2, axis1))
+        self.log.debug("stick command: yaw=%4d thr=%4d pit=%4d rol=%4d" %
+                       (axis4, axis3, axis2, axis1))
+        self.log.debug("stick command: yaw=%04x thr=%04x pit=%04x rol=%04x" %
+                       (axis4, axis3, axis2, axis1))
         pkt.add_byte(((axis2 << 11 | axis1) >> 0) & 0xff)
         pkt.add_byte(((axis2 << 11 | axis1) >> 8) & 0xff)
         pkt.add_byte(((axis3 << 11 | axis2) >> 5) & 0xff)
@@ -394,7 +410,8 @@ class Tello(object):
         pkt.add_byte(((axis4 << 11 | axis3) >> 18) & 0xff)
         pkt.add_time()
         pkt.fixup()
-        log.debug("stick command: %s" % byte_to_hexstring(pkt.get_buffer()))
+        self.log.debug("stick command: %s" %
+                       byte_to_hexstring(pkt.get_buffer()))
         return self.send_packet(pkt)
 
     def send_packet(self, pkt):
@@ -402,12 +419,12 @@ class Tello(object):
         try:
             cmd = pkt.get_buffer()
             self.sock.sendto(cmd, self.tello_addr)
-            log.debug("send_packet: %s" % byte_to_hexstring(cmd))
+            self.log.debug("send_packet: %s" % byte_to_hexstring(cmd))
         except socket.error as err:
             if self.state == self.STATE_CONNECTED:
-                log.error("send_packet: %s" % str(err))
+                self.log.error("send_packet: %s" % str(err))
             else:
-                log.info("send_packet: %s" % str(err))
+                self.log.info("send_packet: %s" % str(err))
             return False
 
         return True
@@ -417,8 +434,8 @@ class Tello(object):
             data = bytearray([x for x in data])
 
         if str(data[0:9]) == 'conn_ack:' or data[0:9] == b'conn_ack:':
-            log.info('connected. (port=%2x%2x)' % (data[9], data[10]))
-            log.debug('    %s' % byte_to_hexstring(data))
+            self.log.info('connected. (port=%2x%2x)' % (data[9], data[10]))
+            self.log.debug('    %s' % byte_to_hexstring(data))
             if self.video_enabled:
                 self.__send_exposure()
                 self.__send_video_encoder_rate()
@@ -428,34 +445,35 @@ class Tello(object):
             return True
 
         if data[0] != START_OF_PACKET:
-            log.info('start of packet != %02x (%02x) (ignored)' % (START_OF_PACKET, data[0]))
-            log.info('    %s' % byte_to_hexstring(data))
-            log.info('    %s' % str(map(chr, data))[1:-1])
+            self.log.info('start of packet != %02x (%02x) (ignored)' %
+                          (START_OF_PACKET, data[0]))
+            self.log.info('    %s' % byte_to_hexstring(data))
+            self.log.info('    %s' % str(map(chr, data))[1:-1])
             return False
 
         pkt = Packet(data)
         cmd = int16(data[5], data[6])
         if cmd == LOG_MSG:
-            log.debug("recv: log: %s" % byte_to_hexstring(data[9:]))
+            self.log.debug("recv: log: %s" % byte_to_hexstring(data[9:]))
             self.__publish(event=self.EVENT_LOG, data=data[9:])
         elif cmd == WIFI_MSG:
-            log.debug("recv: wifi: %s" % byte_to_hexstring(data[9:]))
+            self.log.debug("recv: wifi: %s" % byte_to_hexstring(data[9:]))
             self.__publish(event=self.EVENT_WIFI, data=data[9:])
         elif cmd == LIGHT_MSG:
-            log.debug("recv: light: %s" % byte_to_hexstring(data[9:]))
+            self.log.debug("recv: light: %s" % byte_to_hexstring(data[9:]))
             self.__publish(event=self.EVENT_LIGHT, data=data[9:])
         elif cmd == FLIGHT_MSG:
             flight_data = FlightData(data[9:])
-            log.debug("recv: flight data: %s" % str(flight_data))
+            self.log.debug("recv: flight data: %s" % str(flight_data))
             self.__publish(event=self.EVENT_FLIGHT_DATA, data=flight_data)
         elif cmd == TIME_CMD:
-            log.debug("recv: time data: %s" % byte_to_hexstring(data))
+            self.log.debug("recv: time data: %s" % byte_to_hexstring(data))
             self.__publish(event=self.EVENT_TIME, data=data[7:9])
         elif (TAKEOFF_CMD, LAND_CMD, VIDEO_START_CMD, VIDEO_ENCODER_RATE_CMD):
-            log.info("recv: ack: cmd=0x%02x seq=0x%04x %s" %
-                     (int16(data[5], data[6]), int16(data[7], data[8]), byte_to_hexstring(data)))
+            self.log.info("recv: ack: cmd=0x%02x seq=0x%04x %s" %
+                          (int16(data[5], data[6]), int16(data[7], data[8]), byte_to_hexstring(data)))
         else:
-            log.info('unknown packet: %s' % byte_to_hexstring(data))
+            self.log.info('unknown packet: %s' % byte_to_hexstring(data))
             return False
 
         return True
@@ -465,7 +483,7 @@ class Tello(object):
         cur_state = self.state
         event_connected = False
         event_disconnected = False
-        log.debug('event %s in state %s' % (str(event), str(self.state)))
+        self.log.debug('event %s in state %s' % (str(event), str(self.state)))
 
         if self.state == self.STATE_DISCONNECTED:
             if event == self.__EVENT_CONN_REQ:
@@ -502,7 +520,7 @@ class Tello(object):
             pass
 
         if cur_state != self.state:
-            log.info('state transit %s -> %s' % (cur_state, self.state))
+            self.log.info('state transit %s -> %s' % (cur_state, self.state))
         self.lock.release()
 
         if event_connected:
@@ -522,28 +540,28 @@ class Tello(object):
 
             try:
                 data, server = sock.recvfrom(self.udpsize)
-                log.debug("recv: %s" % byte_to_hexstring(data))
+                self.log.debug("recv: %s" % byte_to_hexstring(data))
                 self.__process_packet(data)
             except socket.timeout as ex:
                 if self.state == self.STATE_CONNECTED:
-                    log.error('recv: timeout')
+                    self.log.error('recv: timeout')
                 self.__publish(event=self.__EVENT_TIMEOUT)
             except Exception as ex:
-                log.error('recv: %s' % str(ex))
+                self.log.error('recv: %s' % str(ex))
                 show_exception(ex)
 
-        log.info('exit from the recv thread.')
+        self.log.info('exit from the recv thread.')
 
     def __video_thread(self):
-        log.info('start video thread')
+        self.log.info('start video thread')
         # Create a UDP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         port = 6038
         sock.bind(('', port))
         sock.settimeout(5.0)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 512 * 1024)
-        log.info('video receive buffer size = %d' %
-                 sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
+        self.log.info('video receive buffer size = %d' %
+                      sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
 
         prev_header = None
         prev_ts = None
@@ -555,14 +573,15 @@ class Tello(object):
             try:
                 data, server = sock.recvfrom(self.udpsize)
                 now = datetime.datetime.now()
-                log.debug("video recv: %s %d bytes" % (byte_to_hexstring(data[0:2]), len(data)))
+                self.log.debug("video recv: %s %d bytes" %
+                               (byte_to_hexstring(data[0:2]), len(data)))
                 show_history = False
 
                 # check video data loss
                 header = byte(data[0])
                 if (prev_header is not None and
                     header != prev_header and
-                    header != ((prev_header + 1) & 0xff)):
+                        header != ((prev_header + 1) & 0xff)):
                     loss = header - prev_header
                     if loss < 0:
                         loss = loss + 256
@@ -575,13 +594,14 @@ class Tello(object):
 
                 # check video data interval
                 if prev_ts is not None and 0.1 < (now - prev_ts).total_seconds():
-                    log.info('video recv: %d bytes %02x%02x +%03d' %
-                             (len(data), byte(data[0]), byte(data[1]),
-                              (now - prev_ts).total_seconds() * 1000))
+                    self.log.info('video recv: %d bytes %02x%02x +%03d' %
+                                  (len(data), byte(data[0]), byte(data[1]),
+                                   (now - prev_ts).total_seconds() * 1000))
                 prev_ts = now
 
                 # save video data history
-                history.append([now, len(data), byte(data[0])*256 + byte(data[1])])
+                history.append(
+                    [now, len(data), byte(data[0])*256 + byte(data[1])])
                 if 100 < len(history):
                     history = history[1:]
 
@@ -589,7 +609,7 @@ class Tello(object):
                 if show_history:
                     prev_ts = history[0][0]
                     for i in range(1, len(history)):
-                        [ ts, sz, sn ] = history[i]
+                        [ts, sz, sn] = history[i]
                         print('    %02d:%02d:%02d.%03d %4d bytes %04x +%03d%s' %
                               (ts.hour, ts.minute, ts.second, ts.microsecond/1000,
                                sz, sn, (ts - prev_ts).total_seconds()*1000,
@@ -607,9 +627,9 @@ class Tello(object):
                 self.video_data_size += len(data)
                 dur = (now - self.prev_video_data_time).total_seconds()
                 if 2.0 < dur:
-                    log.info(('video data %d bytes %5.1fKB/sec' %
-                              (self.video_data_size, self.video_data_size / dur / 1024)) +
-                             ((' loss=%d' % self.video_data_loss) if self.video_data_loss != 0 else ''))
+                    self.log.info(('video data %d bytes %5.1fKB/sec' %
+                                   (self.video_data_size, self.video_data_size / dur / 1024)) +
+                                  ((' loss=%d' % self.video_data_loss) if self.video_data_loss != 0 else ''))
                     self.video_data_size = 0
                     self.prev_video_data_time = now
                     self.video_data_loss = 0
@@ -618,13 +638,14 @@ class Tello(object):
                     self.__send_start_video()
 
             except socket.timeout as ex:
-                log.error('video recv: timeout')
+                self.log.error('video recv: timeout')
                 data = None
             except Exception as ex:
-                log.error('video recv: %s' % str(ex))
+                self.log.error('video recv: %s' % str(ex))
                 show_exception(ex)
 
-        log.info('exit from the video thread.')
+        self.log.info('exit from the video thread.')
+
 
 if __name__ == '__main__':
     print('You can use test.py for testing.')

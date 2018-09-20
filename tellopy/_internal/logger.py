@@ -8,7 +8,7 @@ LOG_DEBUG = 3
 LOG_ALL = 99
 
 
-class Logger:
+class Logger(object):
     def __init__(self, header=''):
         self.log_level = LOG_INFO
         self.header_string = header
@@ -16,7 +16,8 @@ class Logger:
 
     def header(self):
         now = datetime.datetime.now()
-        ts = ("%02d:%02d:%02d.%03d" % (now.hour, now.minute, now.second, now.microsecond/1000))
+        ts = ("%02d:%02d:%02d.%03d" %
+              (now.hour, now.minute, now.second, now.microsecond/1000))
         return "%s: %s" % (self.header_string, ts)
 
     def set_level(self, level):
@@ -46,6 +47,7 @@ class Logger:
         if self.log_level < LOG_DEBUG:
             return
         self.output("%s: Debug: %s" % (self.header(), str))
+
 
 if __name__ == '__main__':
     log = Logger('test')
