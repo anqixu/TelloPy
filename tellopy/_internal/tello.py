@@ -318,8 +318,8 @@ class Tello(object):
         '''
         self.log.debug("stick command: yaw=%4d vrt=%4d pit=%4d rol=%4d" %
                        (axis4, axis3, axis2, axis1))
-        self.log.warn("> %3.1f %3.1f %3.1f %3.1f %4d %4d %4d %4d" % (
-            self.left_x, self.left_y, self.right_x, self.right_y, axis1, axis2, axis3, axis4))
+        # self.log.warn("> %3.1f %3.1f %3.1f %3.1f %4d %4d %4d %4d" % (
+        #    self.left_x, self.left_y, self.right_x, self.right_y, axis1, axis2, axis3, axis4)) # TODO: remove debug
         pkt.add_byte(((axis2 << 11 | axis1) >> 0) & 0xff)
         pkt.add_byte(((axis2 << 11 | axis1) >> 8) & 0xff)
         pkt.add_byte(((axis3 << 11 | axis2) >> 5) & 0xff)
