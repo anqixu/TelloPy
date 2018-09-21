@@ -143,10 +143,11 @@ prev_flight_data = None
 video_player = None
 buttons = None
 speed = 100
-throttle = 0.0
+vspeed = 0.0
 yaw = 0.0
 pitch = 0.0
 roll = 0.0
+
 
 def handler(event, sender, data, **args):
     global prev_flight_data
@@ -178,7 +179,7 @@ def update(old, new, max_delta=0.3):
 
 def handle_input_event(drone, e):
     global speed
-    global throttle
+    global vspeed
     global yaw
     global pitch
     global roll
@@ -187,8 +188,8 @@ def handle_input_event(drone, e):
         if -buttons.DEADZONE <= e.value and e.value <= buttons.DEADZONE:
             e.value = 0.0
         if e.axis == buttons.LEFT_Y:
-            throttle = update(throttle, e.value * buttons.LEFT_Y_REVERSE)
-            drone.set_throttle(throttle)
+            vspeed = update(vspeed, e.value * buttons.LEFT_Y_REVERSE)
+            drone.set_vspeed(vspeed)
         if e.axis == buttons.LEFT_X:
             yaw = update(yaw, e.value * buttons.LEFT_X_REVERSE)
             drone.set_yaw(yaw)
@@ -233,9 +234,9 @@ def handle_input_event(drone, e):
             drone.left(speed)
     elif e.type == pygame.locals.JOYBUTTONUP:
         if e.button == buttons.TAKEOFF:
-            if throttle != 0.0:
+            if vspeed != 0.0:
                 print('###')
-                print('### throttle != 0.0 (This may hinder the drone from taking off)')
+                print('### vspeed != 0.0 (This may hinder the drone from taking off)')
                 print('###')
             drone.takeoff()
         elif e.button == buttons.UP:

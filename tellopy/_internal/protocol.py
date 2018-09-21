@@ -12,30 +12,25 @@ LOG_MSG = 0x1050
 
 VIDEO_ENCODER_RATE_CMD = 0x20
 VIDEO_START_CMD = 0x25
-EXPOSURE_CMD = 0x34
+EXPOSURE_CMD = 52
 TIME_CMD = 70
 STICK_CMD = 80
-TAKEOFF_CMD = 0x0054
-LAND_CMD = 0x0055
-FLIP_CMD = 0x005c
+TAKEOFF_CMD = 84
+THROW_TAKEOFF_CMD = 93
+LAND_CMD = 85
+PALM_LAND_CMD = 94
+FLIP_CMD = 92
+FLATTRIM_CMD = 4180
 
-# Flip commands taken from Go version of code
-# FlipFront flips forward.
-FlipFront = 0
-# FlipLeft flips left.
-FlipLeft = 1
-# FlipBack flips backwards.
-FlipBack = 2
-# FlipRight flips to the right.
-FlipRight = 3
-# FlipForwardLeft flips forwards and to the left.
-FlipForwardLeft = 4
-# FlipBackLeft flips backwards and to the left.
-FlipBackLeft = 5
-# FlipBackRight flips backwards and to the right.
-FlipBackRight = 6
-# FlipForwardRight flips forwards and to the right.
-FlipForwardRight = 7
+FLIP_FRONT = 0
+FLIP_LEFT = 1
+FLIP_BACK = 2
+FLIP_RIGHT = 3
+FLIP_FRONT_LEFT = 4
+FLIP_BACK_LEFT = 5
+FLIP_BACK_RIGHT = 6
+FLIP_FRONT_RIGHT = 7
+FLIP_MAX_INT = 8
 
 
 class Packet(object):

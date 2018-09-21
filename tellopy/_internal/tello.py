@@ -152,12 +152,37 @@ class Tello(object):
         pkt.fixup()
         return self.send_packet(pkt)
 
-    def land(self):
+    def throw_takeoff(self):
+        """Throw_takeoff starts motors and expects to be thrown to takeoff."""
+        self.log.info('throw_takeoff (cmd=0x%02x seq=0x%04x)' %
+                      (THROW_TAKEOFF_CMD, self.pkt_seq_num))
+        pkt = Packet(THROW_TAKEOFF_CMD)
+        pkt.fixup()
+        return self.send_packet(pkt)
+
+    def land(self, stop_landing=False):
         """Land tells the drone to come in for landing."""
         self.log.info('land (cmd=0x%02x seq=0x%04x)' %
                       (LAND_CMD, self.pkt_seq_num))
         pkt = Packet(LAND_CMD)
-        pkt.add_byte(0x00)
+        pkt.add_byte(int(stop_landing))
+        pkt.fixup()
+        return self.send_packet(pkt)
+
+    def palm_land(self, stop_landing=False):
+        """Palm_land tells the drone to cut motors near flat surface below."""
+        self.log.info('palm_land (cmd=0x%02x seq=0x%04x)' %
+                      (PALM_LAND_CMD, self.pkt_seq_num))
+        pkt = Packet(PALM_LAND_CMD)
+        pkt.add_byte(int(stop_landing))
+        pkt.fixup()
+        return self.send_packet(pkt)
+
+    def flattrim(self):
+        """FlatTrim re-calibrates IMU to be horizontal."""
+        self.log.info('flattrim (cmd=0x%02x seq=0x%04x)' %
+                      (FLATTRIM_CMD, self.pkt_seq_num))
+        pkt = Packet(FLATTRIM_CMD)
         pkt.fixup()
         return self.send_packet(pkt)
 
@@ -219,121 +244,14 @@ class Tello(object):
         pkt.fixup()
         return self.send_packet(pkt)
 
-    def up(self, val):
-        """Up tells the drone to ascend. Pass in an int from 0-100."""
-        self.log.info('up(val=%d)' % val)
-        self.left_y = val / 100.0
-
-    def down(self, val):
-        """Down tells the drone to descend. Pass in an int from 0-100."""
-        self.log.info('down(val=%d)' % val)
-        self.left_y = val / 100.0 * -1
-
-    def forward(self, val):
-        """Forward tells the drone to go forward. Pass in an int from 0-100."""
-        self.log.info('forward(val=%d)' % val)
-        self.right_y = val / 100.0
-
-    def backward(self, val):
-        """Backward tells the drone to go in reverse. Pass in an int from 0-100."""
-        self.log.info('backward(val=%d)' % val)
-        self.right_y = val / 100.0 * -1
-
-    def right(self, val):
-        """Right tells the drone to go right. Pass in an int from 0-100."""
-        self.log.info('right(val=%d)' % val)
-        self.right_x = val / 100.0
-
-    def left(self, val):
-        """Left tells the drone to go left. Pass in an int from 0-100."""
-        self.log.info('left(val=%d)' % val)
-        self.right_x = val / 100.0 * -1
-
-    def clockwise(self, val):
-        """
-        Clockwise tells the drone to rotate in a clockwise direction.
-        Pass in an int from 0-100.
-        """
-        self.log.info('clockwise(val=%d)' % val)
-        self.left_x = val / 100.0
-
-    def counter_clockwise(self, val):
-        """
-        CounterClockwise tells the drone to rotate in a counter-clockwise direction.
-        Pass in an int from 0-100.
-        """
-        self.log.info('counter_clockwise(val=%d)' % val)
-        self.left_x = val / 100.0 * -1
-
-    def flip_forward(self):
-        """flip_forward tells the drone to perform a forwards flip"""
-        self.log.info('flip_forward (cmd=0x%02x seq=0x%04x)' %
+    def flip(self, flip_dir=FLIP_FRONT):
+        """flip tells the drone to perform a flip given a protocol.FLIP_XYZ direction"""
+        self.log.info('flip (cmd=0x%02x seq=0x%04x)' %
                       (FLIP_CMD, self.pkt_seq_num))
         pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipFront)
-        pkt.fixup()
-        return self.send_packet(pkt)
-
-    def flip_back(self):
-        """flip_back tells the drone to perform a backwards flip"""
-        self.log.info('flip_back (cmd=0x%02x seq=0x%04x)' %
-                      (FLIP_CMD, self.pkt_seq_num))
-        pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipBack)
-        pkt.fixup()
-        return self.send_packet(pkt)
-
-    def flip_right(self):
-        """flip_right tells the drone to perform a right flip"""
-        self.log.info('flip_right (cmd=0x%02x seq=0x%04x)' %
-                      (FLIP_CMD, self.pkt_seq_num))
-        pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipRight)
-        pkt.fixup()
-        return self.send_packet(pkt)
-
-    def flip_left(self):
-        """flip_left tells the drone to perform a left flip"""
-        self.log.info('flip_left (cmd=0x%02x seq=0x%04x)' %
-                      (FLIP_CMD, self.pkt_seq_num))
-        pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipLeft)
-        pkt.fixup()
-        return self.send_packet(pkt)
-
-    def flip_forwardleft(self):
-        """flip_forwardleft tells the drone to perform a forwards left flip"""
-        self.log.info('flip_forwardleft (cmd=0x%02x seq=0x%04x)' %
-                      (FLIP_CMD, self.pkt_seq_num))
-        pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipForwardLeft)
-        pkt.fixup()
-        return self.send_packet(pkt)
-
-    def flip_backleft(self):
-        """flip_backleft tells the drone to perform a backwards left flip"""
-        self.log.info('flip_backleft (cmd=0x%02x seq=0x%04x)' %
-                      (FLIP_CMD, self.pkt_seq_num))
-        pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipBackLeft)
-        pkt.fixup()
-        return self.send_packet(pkt)
-
-    def flip_forwardright(self):
-        """flip_forwardright tells the drone to perform a forwards right flip"""
-        self.log.info('flip_forwardright (cmd=0x%02x seq=0x%04x)' %
-                      (FLIP_CMD, self.pkt_seq_num))
-        pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipForwardRight)
-        pkt.fixup()
-        return self.send_packet(pkt)
-
-    def flip_backright(self):
-        """flip_backleft tells the drone to perform a backwards right flip"""
-        self.log.info('flip_backright (cmd=0x%02x seq=0x%04x)' %
-                      (FLIP_CMD, self.pkt_seq_num))
-        pkt = Packet(FLIP_CMD, 0x70)
-        pkt.add_byte(FlipBackLeft)
+        if flip_dir < 0 or flip_dir >= FLIP_MAX_INT:
+            flip_dir = FLIP_FRONT
+        pkt.add_byte(flip_dir)
         pkt.fixup()
         return self.send_packet(pkt)
 
@@ -344,14 +262,14 @@ class Tello(object):
             val = max
         return val
 
-    def set_throttle(self, throttle):
+    def set_vspeed(self, vspeed):
         """
-        Set_throttle controls the vertical up and down motion of the drone.
+        Set_vspeed controls the vertical up and down motion of the drone.
         Pass in an int from -1.0 ~ 1.0. (positive value means upward)
         """
-        if self.left_y != self.__fix_range(throttle):
-            self.log.info('set_throttle(val=%4.2f)' % throttle)
-        self.left_y = self.__fix_range(throttle)
+        if self.left_y != self.__fix_range(vspeed):
+            self.log.info('set_vspeed(val=%4.2f)' % vspeed)
+        self.left_y = self.__fix_range(vspeed)
 
     def set_yaw(self, yaw):
         """
@@ -398,10 +316,10 @@ class Tello(object):
          |       |       |       |       |       |       |
              byte5   byte4   byte3   byte2   byte1   byte0
         '''
-        self.log.debug("stick command: yaw=%4d thr=%4d pit=%4d rol=%4d" %
+        self.log.debug("stick command: yaw=%4d vrt=%4d pit=%4d rol=%4d" %
                        (axis4, axis3, axis2, axis1))
-        self.log.debug("stick command: yaw=%04x thr=%04x pit=%04x rol=%04x" %
-                       (axis4, axis3, axis2, axis1))
+        self.log.warn("> %3.1f %3.1f %3.1f %3.1f %4d %4d %4d %4d" % (
+            self.left_x, self.left_y, self.right_x, self.right_y, axis1, axis2, axis3, axis4))
         pkt.add_byte(((axis2 << 11 | axis1) >> 0) & 0xff)
         pkt.add_byte(((axis2 << 11 | axis1) >> 8) & 0xff)
         pkt.add_byte(((axis3 << 11 | axis2) >> 5) & 0xff)
@@ -469,7 +387,7 @@ class Tello(object):
         elif cmd == TIME_CMD:
             self.log.debug("recv: time data: %s" % byte_to_hexstring(data))
             self.__publish(event=self.EVENT_TIME, data=data[7:9])
-        elif (TAKEOFF_CMD, LAND_CMD, VIDEO_START_CMD, VIDEO_ENCODER_RATE_CMD):
+        elif cmd in (TAKEOFF_CMD, THROW_TAKEOFF_CMD, LAND_CMD, PALM_LAND_CMD, FLATTRIM_CMD, VIDEO_START_CMD, VIDEO_ENCODER_RATE_CMD):
             self.log.info("recv: ack: cmd=0x%02x seq=0x%04x %s" %
                           (int16(data[5], data[6]), int16(data[7], data[8]), byte_to_hexstring(data)))
         else:
