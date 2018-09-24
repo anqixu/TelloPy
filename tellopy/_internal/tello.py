@@ -1,8 +1,9 @@
-import threading
-import socket
-import time
 import datetime
+import socket
+import struct
 import sys
+import threading
+import time
 
 from . import crc
 from . import logger
@@ -51,11 +52,17 @@ class Tello(object):
     LOG_DEBUG = logger.LOG_DEBUG
     LOG_ALL = logger.LOG_ALL
 
-    def __init__(self, client_port=9000, tello_ip='192.168.0.1', tello_cmd_port=8889, log=None):
-        self.tello_addr = (tello_ip, tello_cmd_port)
+    def __init__(self,
+                 local_cmd_client_port=9000,
+                 local_vid_server_port=6038,
+                 tello_ip='192.168.0.1',
+                 tello_cmd_server_port=8889,
+                 log=None):
+        self.tello_addr = (tello_ip, tello_cmd_server_port)
         self.debug = False
         self.pkt_seq_num = 0x01e4
-        self.client_port = client_port
+        self.local_cmd_client_port = local_cmd_client_port
+        self.local_vid_server_port = local_vid_server_port
         self.udpsize = 2000
         self.left_x = 0.0
         self.left_y = 0.0
@@ -76,7 +83,7 @@ class Tello(object):
 
         # Create a UDP socket
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(('', self.client_port))
+        self.sock.bind(('', self.local_cmd_client_port))
         self.sock.settimeout(2.0)
 
         dispatcher.connect(self.__state_machine, dispatcher.signal.All)
@@ -123,12 +130,10 @@ class Tello(object):
             raise error.TelloError('timeout')
 
     def __send_conn_req(self):
-        port = 9617
-        port0 = (int(port/1000) % 10) << 4 | (int(port/100) % 10)
-        port1 = (int(port/10) % 10) << 4 | (int(port/1) % 10)
-        buf = 'conn_req:%c%c' % (chr(port0), chr(port1))
-        self.log.info('send connection request (cmd="%s%02x%02x")' %
-                      (str(buf[:-2]), port0, port1))
+        port_bytes = struct.pack('<H', self.local_vid_server_port)
+        buf = 'conn_req:'+port_bytes
+        self.log.info('send connection request (cmd="%sx%02xx%02x")' %
+                      (str(buf[:-2]), ord(port_bytes[0]), ord(port_bytes[1])))
         return self.send_packet(Packet(buf))
 
     def subscribe(self, signal, handler):
@@ -352,7 +357,8 @@ class Tello(object):
             data = bytearray([x for x in data])
 
         if str(data[0:9]) == 'conn_ack:' or data[0:9] == b'conn_ack:':
-            self.log.info('connected. (port=%2x%2x)' % (data[9], data[10]))
+            self.log.info('connected. (vid_port=x%2xx%2x)' %
+                          (data[9], data[10]))
             self.log.debug('    %s' % byte_to_hexstring(data))
             if self.video_enabled:
                 self.__send_exposure()
@@ -474,8 +480,7 @@ class Tello(object):
         self.log.info('start video thread')
         # Create a UDP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        port = 6038
-        sock.bind(('', port))
+        sock.bind(('', self.local_vid_server_port))
         sock.settimeout(5.0)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 512 * 1024)
         self.log.info('video receive buffer size = %d' %
