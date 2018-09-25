@@ -1,60 +1,36 @@
-# DJI Tello drone controller python package
+# Unofficial Python module for DJI Tello drone
 
-This is a python package which controlls DJI toy drone 'Tello'. The major portion of the source
-code was ported from the driver of GOBOT project. For original golang version and protocol in
-detail, please refer their blog post at
-https://gobot.io/blog/2018/04/20/hello-tello-hacking-drones-with-go
+This fork is modified/extended from [hanyazou/TelloPy](https://github.com/hanyazou/TelloPy)
+as a Python module for controlling and communicating with the
+[Tello drone](https://store.dji.com/product/tello) from DJI/Ryze.
+This fork serves mainly as a base for the [ROS](http://www.ros.org/about-ros/)
+module [tello_driver](https://github.com/anqixu/tello_driver).
 
-![photo](files/tello-and-gamepad.png)
+Unlike the base TelloPy, you must install this fork from source.
+It is recommended that you do the following (assuming Ubuntu/debian distro),
+to make an editable installation:
 
-## How to install
-You can install stable version from PyPI.
-```
-$ pip install tellopy
-```
-Or install from the source code.
-```
-$ git clone https://github.com/hanyazou/TelloPy 
-$ cd TelloPy
-$ python setup.py bdist_wheel
-$ pip install dist/tellopy-*.dev*.whl --upgrade
-```
+* `$ cd <PATH_TO_SOURCE>`
+* `$ git clone https://github.com/anqixu/TelloPy.git`
+* `$ cd TelloPy`
+* `$ sudo -H pip install -e .`
 
-## Documents
-Please see the API docstring.
-```
-$ python
->>> import tellopy
->>> help(tellopy)
-Help on package tellopy:
-...
-```
+## Sources of knowledge
 
-## Examples
+There are a number of other codebases for communicating with the Tello, each
+with a partially-overlaping set of features, in no particular order:
 
-You can find basic usage of this package in example code in the examples folder.
+* [TelloPy by hanyazou](https://github.com/hanyazou/TelloPy)
+* [pytello by PingguSoft](https://bitbucket.org/PingguSoft/pytello)
+* [TelloLib by Kragrathea](https://github.com/Kragrathea/TelloLib)
+* [gobot/tello by deadprogram](https://github.com/hybridgroup/gobot/tree/master/platforms/dji/tello)
 
-### simple_takeoff
-This example let Tello take off. Tello will land automatically after a few seconds.
+The underlying UDP protocols for communicating with the drone and receiving
+its video feed were reverse-engineered by the community, notably those listed above.
+Valuable tidbits include, in no particular order:
 
-```
-$ python -m tellopy.examples.simple_takeoff
-```
-
-### video_effect
-Filter and display the realtime video stream from Tello.
-```
-$ pip install av
-$ pip install opencv-python
-$ pip install image
-$ python -m tellopy.examples.video_effect
-```
-![photo](files/video_effect.jpg)
-
-### joystick_and_video
-You can use PS3/PS4/XONE joystick to controll Tello.
-(see my video https://www.youtube.com/watch?v=MWdNFRdRuj8)
-```
-$ pip install pygame
-$ python -m tellopy.examples.joystick_and_video
-```
+* [Tello general dev thread](https://tellopilots.com/threads/tello-whats-possible.88/)
+* [Log packet decoding thread](https://tellopilots.com/threads/has-anyone-decoded-the-log-headers-messages-from-the-tello.511/)
+* [Gobot Tello blog post](https://gobot.io/blog/2018/04/20/hello-tello-hacking-drones-with-go/)
+* [TelloPilots Dev Forum](https://tellopilots.com/forums/tello-development.8/)
+* [TelloPilots Wiki](https://tellopilots.com/wiki/index/)
