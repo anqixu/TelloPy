@@ -491,7 +491,7 @@ class Tello(object):
         history = []
         while self.state != self.STATE_QUIT:
             if not self.video_enabled:
-                time.sleep(1.0)
+                time.sleep(0.1)
                 continue
             try:
                 data, server = sock.recvfrom(self.udpsize)
