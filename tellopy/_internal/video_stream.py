@@ -10,13 +10,13 @@ class VideoStream(object):
         self.closed = False
         drone.subscribe(drone.EVENT_CONNECTED, self.__handle_event)
         drone.subscribe(drone.EVENT_DISCONNECTED, self.__handle_event)
-        drone.subscribe(drone.EVENT_VIDEO_DATA, self.__handle_event)
+        drone.subscribe(drone.EVENT_VIDEO_PACKET, self.__handle_event)
 
     def read(self, size):
         self.cond.acquire()
         try:
             if len(self.queue) == 0 and not self.closed:
-                self.cond.wait(5.0)
+                self.cond.wait(2.0)
             data = bytes()
             while 0 < len(self.queue) and len(data) + len(self.queue[0]) < size:
                 data = data + self.queue[0]
@@ -24,11 +24,13 @@ class VideoStream(object):
         finally:
             self.cond.release()
         # returning data of zero length indicates end of stream
-        self.log.debug('%s.read(size=%d) = %d' % (self.__class__, size, len(data)))
+        self.log.debug('%s.read(size=%d) = %d' %
+                       (self.__class__, size, len(data)))
         return data
 
     def seek(self, offset, whence):
-        self.log.info('%s.seek(%d, %d)' % (str(self.__class__), offset, whence))
+        self.log.info('%s.seek(%d, %d)' %
+                      (str(self.__class__), offset, whence))
         return -1
 
     def __handle_event(self, event, sender, data):
@@ -41,8 +43,9 @@ class VideoStream(object):
             self.closed = True
             self.cond.notifyAll()
             self.cond.release()
-        elif event is self.drone.EVENT_VIDEO_DATA:
-            self.log.debug('%s.handle_event(VIDEO_DATA, size=%d)' % (self.__class__, len(data)))
+        elif event is self.drone.EVENT_VIDEO_PACKET:
+            self.log.debug('%s.handle_event(VIDEO_PACKET, size=%d)' %
+                           (self.__class__, len(data)))
             self.cond.acquire()
             self.queue.append(data[2:])
             self.cond.notifyAll()
