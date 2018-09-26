@@ -64,6 +64,7 @@ class Tello(object):
         self.left_y = 0.0
         self.right_x = 0.0
         self.right_y = 0.0
+        self.fast_mode = False
         self.sock = None
         self.state = self.STATE_DISCONNECTED
         self.lock = threading.Lock()
@@ -304,11 +305,15 @@ class Tello(object):
             self.log.info('set_roll(val=%4.2f)' % roll)
         self.right_x = self.__fix_range(roll)
 
+    def set_fast_mode(self, enabled):
+        self.fast_mode = enabled
+
     def reset_cmd_vel(self):
         self.left_x = 0.
         self.left_y = 0.
         self.right_x = 0.
         self.right_y = 0.
+        self.fast_mode = False
 
     def __send_stick_command(self):
         pkt = Packet(STICK_CMD, 0x60)
@@ -317,25 +322,31 @@ class Tello(object):
         axis2 = int(1024 + 660.0 * self.right_y) & 0x7ff
         axis3 = int(1024 + 660.0 * self.left_y) & 0x7ff
         axis4 = int(1024 + 660.0 * self.left_x) & 0x7ff
+        axis5 = int(self.fast_mode) & 0x01
+        self.log.debug("stick command: fast=%d yaw=%4d vrt=%4d pit=%4d rol=%4d" %
+                       (axis5, axis4, axis3, axis2, axis1))
+
         '''
         11 bits (-1024 ~ +1023) x 4 axis = 44 bits
-        44 bits will be packed in to 6 bytes (48 bits)
+        fast_mode takes 1 bit
+        44+1 bits will be packed in to 6 bytes (48 bits)
 
-                    axis4      axis3      axis2      axis1
+         axis5      axis4      axis3      axis2      axis1
              |          |          |          |          |
                  4         3         2         1         0
         98765432109876543210987654321098765432109876543210
          |       |       |       |       |       |       |
              byte5   byte4   byte3   byte2   byte1   byte0
         '''
-        self.log.debug("stick command: yaw=%4d vrt=%4d pit=%4d rol=%4d" %
-                       (axis4, axis3, axis2, axis1))
-        pkt.add_byte(((axis2 << 11 | axis1) >> 0) & 0xff)
-        pkt.add_byte(((axis2 << 11 | axis1) >> 8) & 0xff)
-        pkt.add_byte(((axis3 << 11 | axis2) >> 5) & 0xff)
-        pkt.add_byte(((axis4 << 11 | axis3) >> 2) & 0xff)
-        pkt.add_byte(((axis4 << 11 | axis3) >> 10) & 0xff)
-        pkt.add_byte(((axis4 << 11 | axis3) >> 18) & 0xff)
+        packed = axis1 | (axis2 << 11) | (
+            axis3 << 22) | (axis4 << 33) | (axis5 << 44)
+        packed_bytes = struct.pack('<Q', packed)
+        pkt.add_byte(byte(packed_bytes[0]))
+        pkt.add_byte(byte(packed_bytes[1]))
+        pkt.add_byte(byte(packed_bytes[2]))
+        pkt.add_byte(byte(packed_bytes[3]))
+        pkt.add_byte(byte(packed_bytes[4]))
+        pkt.add_byte(byte(packed_bytes[5]))
         pkt.add_time()
         pkt.fixup()
         self.log.debug("stick command: %s" %

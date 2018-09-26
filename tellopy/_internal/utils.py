@@ -13,6 +13,7 @@ def le16(val):
 
 
 def int16(val0, val1):
+    """Assume little endian."""
     val = (val0 & 0xff) | ((val1 & 0xff) << 8)
     if val > 32767:
         val -= 65536
