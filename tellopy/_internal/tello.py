@@ -126,9 +126,12 @@ class Tello(object):
 
     def __send_conn_req(self):
         port_bytes = struct.pack('<H', self.local_vid_server_port)
-        buf = 'conn_req:'+port_bytes
+        if isinstance(port_bytes, str):
+            buf = 'conn_req:'+port_bytes
+        else:
+            buf = b'conn_req:'+port_bytes
         self.log.info('send connection request (cmd="%sx%02xx%02x")' %
-                      (str(buf[:-2]), ord(port_bytes[0]), ord(port_bytes[1])))
+                      (str(buf[:-2]), byte(port_bytes[0]), byte(port_bytes[1])))
         return self.send_packet(Packet(buf))
 
     def subscribe(self, signal, handler):
