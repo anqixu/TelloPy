@@ -24,7 +24,7 @@ class Tello(object):
     EVENT_LOG = event.Event('log')
     EVENT_TIME = event.Event('time')
 
-    # data = (frame_secs, payload_bytes)
+    # data = (payload_bytes, consec_incr_seq_id, frame_secs)
     EVENT_VIDEO_FRAME = event.Event('video_frame')
 
     # data = bytes([seq_id_byte, sub_id_byte, payload_bytes])
@@ -205,7 +205,7 @@ class Tello(object):
         pkt.fixup()
         return self.send_packet(pkt)
 
-    def __send_req_video_sps_pps(self):
+    def send_req_video_sps_pps(self):
         """Manually request drone to send an I-frame info (SPS/PPS) for video stream."""
         pkt = Packet(VIDEO_REQ_SPS_PPS_CMD, 0x60)
         pkt.fixup()
@@ -218,7 +218,7 @@ class Tello(object):
         self.video_enabled = True
         self.__send_exposure()
         self.__send_video_encoder_rate()
-        return self.__send_req_video_sps_pps()
+        return self.send_req_video_sps_pps()
 
     def set_exposure(self, level):
         """Set_exposure sets the drone camera exposure level. Valid levels are 0, 1, and 2."""
@@ -382,7 +382,7 @@ class Tello(object):
             if self.video_enabled:
                 self.__send_exposure()
                 self.__send_video_encoder_rate()
-                self.__send_req_video_sps_pps()
+                self.send_req_video_sps_pps()
             self.__publish(self.__EVENT_CONN_ACK, data)
 
             return True
@@ -510,6 +510,7 @@ class Tello(object):
         frame_t = None
         frame_pkts = []
         last_req_sps_t = None
+        seq_block_count = 0
         while self.state != self.STATE_QUIT:
             if not self.video_enabled:
                 time.sleep(0.1)
@@ -531,7 +532,10 @@ class Tello(object):
 
                 # associate packet to (new) frame
                 if prev_seq_id is None or prev_seq_id != seq_id:
-                    frame_pkts = [None]*128
+                    # detect wrap-arounds
+                    if prev_seq_id is not None and prev_seq_id > seq_id:
+                        seq_block_count += 1
+                    frame_pkts = [None]*128  # since sub_id uses 7 bits
                     frame_t = now
                     prev_seq_id = seq_id
                 frame_pkts[sub_id] = packet
@@ -549,7 +553,7 @@ class Tello(object):
                     else:
                         frame = b''.join(frame_pkts[:sub_id+1])
                     self.__publish(event=self.EVENT_VIDEO_FRAME,
-                                   data=(frame_t, frame))
+                                   data=(frame, seq_block_count*256+seq_id, frame_t))
 
                     # notify frame
                     self.log.debug("frame recv: %3u, %4d bytes" %
@@ -561,7 +565,7 @@ class Tello(object):
                 dur = now - last_req_sps_t
                 if self.video_req_sps_hz > 0 and dur > 1.0/self.video_req_sps_hz:
                     last_req_sps_t = now
-                    self.__send_req_video_sps_pps()
+                    self.send_req_video_sps_pps()
 
             except socket.timeout as ex:
                 self.log.error('video recv: timeout')
