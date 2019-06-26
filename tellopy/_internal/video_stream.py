@@ -10,17 +10,20 @@ class VideoStream(object):
         self.closed = False
         drone.subscribe(drone.EVENT_CONNECTED, self.__handle_event)
         drone.subscribe(drone.EVENT_DISCONNECTED, self.__handle_event)
-        drone.subscribe(drone.EVENT_VIDEO_PACKET, self.__handle_event)
+        #drone.subscribe(drone.EVENT_VIDEO_PACKET, self.__handle_event)
+        drone.subscribe(drone.EVENT_VIDEO_FRAME, self.__handle_event)
 
     def read(self, size):
+        data = bytes()
         self.cond.acquire()
         try:
             if len(self.queue) == 0 and not self.closed:
                 self.cond.wait(2.0)
-            data = bytes()
             while 0 < len(self.queue) and len(data) + len(self.queue[0]) < size:
                 data = data + self.queue[0]
                 del self.queue[0]
+        except KeyboardInterrupt:
+            self.closed = True
         finally:
             self.cond.release()
         # returning data of zero length indicates end of stream
@@ -43,10 +46,18 @@ class VideoStream(object):
             self.closed = True
             self.cond.notifyAll()
             self.cond.release()
-        elif event is self.drone.EVENT_VIDEO_PACKET:
-            self.log.debug('%s.handle_event(VIDEO_PACKET, size=%d)' %
-                           (self.__class__, len(data)))
+        elif event is self.drone.EVENT_VIDEO_FRAME:
+            payload_bytes, consec_incr_seq_id, frame_secs = data
+            self.log.debug('%s.handle_event(VIDEO_FRAME, size=%d)' %
+                           (self.__class__, len(payload_bytes)))
             self.cond.acquire()
-            self.queue.append(data[2:])
+            self.queue.append(payload_bytes)
             self.cond.notifyAll()
             self.cond.release()
+        # elif event is self.drone.EVENT_VIDEO_PACKET:  # NOTE: disabled since tello.py can handle frame alignment, so worth the sacrifice in latency
+        #     self.log.debug('%s.handle_event(VIDEO_PACKET, size=%d)' %
+        #                    (self.__class__, len(data)))
+        #     self.cond.acquire()
+        #     self.queue.append(data[2:])
+        #     self.cond.notifyAll()
+        #     self.cond.release()

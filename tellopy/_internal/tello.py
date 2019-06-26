@@ -16,6 +16,56 @@ from . protocol import *
 from . import dispatcher
 
 
+class VideoFrame(object):
+    def __init__(self, seq_id):
+        self.seq_id = seq_id
+        self.packets = dict()
+        self.last_sub_id = None
+        self.frame_t = None
+        self.complete = False
+
+    def store_packet(self, sub_id, payload):
+        if sub_id in self.packets:
+            raise IndexError('Repeated sub_id: %d' % sub_id)
+        sub_last = False
+        if sub_id >= 128:
+            sub_last = True
+            sub_id -= 128
+        if sub_last:
+            self.last_sub_id = sub_id
+        self.packets[sub_id] = payload
+        self.frame_t = time.time()
+        self.complete = (self.last_sub_id is not None and len(self.packets) == self.last_sub_id+1)
+
+    def get_frame(self, pad_missing_packets=False):
+        if len(self.packets) <= 0:
+            raise ValueError('Empty frame')
+        elif self.last_sub_id is None:
+            raise ValueError('Incomplete frame without last packet')
+
+        mid_packet_len = 0
+        for sub_id in self.packets:
+            if sub_id < self.last_sub_id:
+                if len(self.packets[sub_id]) > mid_packet_len:
+                    mid_packet_len = len(self.packets[sub_id])
+
+        if isinstance(self.packets[self.last_sub_id], str):
+            frame = ''
+            for sub_id in range(self.last_sub_id+1):
+                if sub_id in self.packets:
+                    frame += self.packets[sub_id]
+                elif pad_missing_packets:
+                    frame += chr(0)*mid_packet_len
+        else: # bytes
+            frame = b''
+            for sub_id in range(self.last_sub_id+1):
+                if sub_id in self.packets:
+                    frame += self.packets[sub_id]
+                elif pad_missing_packets:
+                    frame += bytes(bytearray(mid_packet_len))
+        return frame
+
+
 class Tello(object):
     EVENT_CONNECTED = event.Event('connected')
     EVENT_WIFI = event.Event('wifi')
@@ -51,7 +101,7 @@ class Tello(object):
     def __init__(self,
                  local_cmd_client_port=9000,
                  local_vid_server_port=6038,
-                 tello_ip='192.168.0.1',
+                 tello_ip='192.168.10.1',
                  tello_cmd_server_port=8889,
                  log=None):
         self.tello_addr = (tello_ip, tello_cmd_server_port)
@@ -495,25 +545,24 @@ class Tello(object):
 
         self.log.info('exit from the recv thread.')
 
-    def __video_thread(self):
+    def __video_thread(self, pub_partial_packets=True, pad_missing_packets=True):
         self.log.info('start video thread')
         # Create a UDP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(('', self.local_vid_server_port))
         sock.settimeout(5.0)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF,
-                        2048)  # observed max packet size: 1460
+                        self.udpsize)  # observed max packet size: 1460
         self.log.debug('video receive buffer size = %d bytes' %
                        sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF))
 
-        prev_seq_id = None
-        frame_t = None
-        frame_pkts = []
+        prev_frame = None
+        curr_frame = None
         last_req_sps_t = None
         seq_block_count = 0
         while self.state != self.STATE_QUIT:
             if not self.video_enabled:
-                time.sleep(0.1)
+                time.sleep(0.01)
                 continue
             try:
                 # receive and publish packet
@@ -525,39 +574,89 @@ class Tello(object):
                 seq_id = byte(data[0])
                 sub_id = byte(data[1])
                 packet = data[2:]
-                sub_last = False
-                if sub_id >= 128:  # MSB asserted
-                    sub_id -= 128
-                    sub_last = True
-
-                # associate packet to (new) frame
-                if prev_seq_id is None or prev_seq_id != seq_id:
-                    # detect wrap-arounds
-                    if prev_seq_id is not None and prev_seq_id > seq_id:
-                        seq_block_count += 1
-                    frame_pkts = [None]*128  # since sub_id uses 7 bits
-                    frame_t = now
-                    prev_seq_id = seq_id
-                frame_pkts[sub_id] = packet
+                sub_last = (sub_id >= 128)  # MSB asserted
 
                 # notify packet
                 self.log.debug("packet recv: %3u %3u %s, %4d bytes" %
-                               (seq_id, sub_id,
+                               (seq_id, sub_id-128 if sub_last else sub_id,
                                 'L' if sub_last else ' ',
                                 len(data)))
 
-                # publish frame if completed
-                if sub_last and all(frame_pkts[:sub_id+1]):
-                    if isinstance(frame_pkts[sub_id], str):
-                        frame = ''.join(frame_pkts[:sub_id+1])
-                    else:
-                        frame = b''.join(frame_pkts[:sub_id+1])
-                    self.__publish(event=self.EVENT_VIDEO_FRAME,
-                                   data=(frame, seq_block_count*256+seq_id, frame_t))
+                # associate packet to frame
+                drop_frame = None
+                if curr_frame is None: # First ever packet
+                    curr_frame = VideoFrame(seq_id)
+                    curr_frame.store_packet(sub_id, packet)
+                elif seq_id == curr_frame.seq_id: # current frame
+                    curr_frame.store_packet(sub_id, packet)
+                elif seq_id > curr_frame.seq_id: # next frame
+                    seq_id_diff = seq_id - curr_frame.seq_id
+                    if seq_id_diff == 1:
+                        drop_frame = prev_frame
+                        prev_frame = curr_frame
+                    else: # > 1
+                        drop_frame = curr_frame
+                        prev_frame = None
+                    curr_frame = VideoFrame(seq_id)
+                    curr_frame.store_packet(sub_id, packet)
+                elif curr_frame.seq_id >= 254 and seq_id <= 1: # next frame with wrap-around
+                    seq_block_count += 1
+                    seq_id_diff = 256 + seq_id - curr_frame.seq_id
+                    if seq_id_diff == 1:
+                        drop_frame = prev_frame
+                        prev_frame = curr_frame
+                    else: # > 1
+                        drop_frame = curr_frame
+                        prev_frame = None
+                    curr_frame = VideoFrame(seq_id)
+                    curr_frame.store_packet(sub_id, packet)
+                elif prev_frame is not None and prev_frame.seq_id == seq_id: # prev frame
+                    prev_frame.store_packet(sub_id, packet)
+                else: # before prev frame
+                    pass # drop packet
 
-                    # notify frame
-                    self.log.debug("frame recv: %3u, %4d bytes" %
-                                   (seq_id, len(frame)))
+                # publish frames when available
+                if pub_partial_packets and drop_frame is not None and drop_frame.last_sub_id is not None:
+                    frame = drop_frame.get_frame(pad_missing_packets)
+                    frame_seq_id = drop_frame.seq_id
+                    frame_contig_seq_id = seq_block_count*256+frame_seq_id
+                    if frame_seq_id > curr_frame.seq_id:
+                        frame_contig_seq_id -= 1 # before seq_id wrap-around
+                    frame_t = drop_frame.frame_t
+
+                    self.__publish(event=self.EVENT_VIDEO_FRAME,
+                                   data=(frame, frame_contig_seq_id, frame_t))
+                    self.log.debug("frame recv: %3u, (%5u), %6d bytes (outdated)" %
+                                   (frame_seq_id, frame_contig_seq_id, len(frame)))
+
+                if prev_frame is not None and (prev_frame.complete or (pub_partial_packets and curr_frame.complete and prev_frame.last_sub_id is not None)):
+                    frame = prev_frame.get_frame(pad_missing_packets)
+                    frame_seq_id = prev_frame.seq_id
+                    frame_contig_seq_id = seq_block_count*256+frame_seq_id
+                    if frame_seq_id > curr_frame.seq_id:
+                        frame_contig_seq_id -= 1 # before seq_id wrap-around
+                    frame_t = prev_frame.frame_t
+
+                    self.__publish(event=self.EVENT_VIDEO_FRAME,
+                                   data=(frame, frame_contig_seq_id, frame_t))
+                    self.log.debug("frame recv: %3u, (%5u), %6d bytes (outdated)" %
+                                   (frame_seq_id, frame_contig_seq_id, len(frame)))
+
+                    prev_frame = None
+                
+                if curr_frame is not None and curr_frame.complete:
+                    frame = curr_frame.get_frame(pad_missing_packets)
+                    frame_seq_id = curr_frame.seq_id
+                    frame_contig_seq_id = seq_block_count*256+frame_seq_id
+                    frame_t = curr_frame.frame_t
+
+                    self.__publish(event=self.EVENT_VIDEO_FRAME,
+                                   data=(frame, frame_contig_seq_id, frame_t))
+                    self.log.debug("frame recv: %3u, (%5u), %6d bytes (outdated)" %
+                                   (frame_seq_id, frame_contig_seq_id, len(frame)))
+
+                    curr_frame = None
+                    prev_frame = None # do not publish prev frame out of order
 
                 # Regularly request SPS/PPS data to repair broken video stream
                 if last_req_sps_t is None:
